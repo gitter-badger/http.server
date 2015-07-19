@@ -4,6 +4,7 @@ import black.door.net.http.server.annotations.PostFilter;
 import black.door.net.http.server.annotations.PreFilter;
 import black.door.net.http.server.responses.StandardResponses;
 import black.door.net.http.server.singletons.Config;
+import black.door.net.http.tools.HttpParsingException;
 import black.door.net.http.tools.HttpRequest;
 import black.door.net.http.tools.HttpResponse;
 import black.door.net.server.ServerThread;
@@ -18,6 +19,7 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.Socket;
+import java.net.SocketException;
 import java.net.SocketTimeoutException;
 import java.net.URISyntaxException;
 
@@ -51,13 +53,10 @@ class HttpServerThread implements ServerThread, ContextualElement{
             }
 
             sock.close();
-        } catch (IOException e) {
-            printException(e);
-            return;
-        }
+        }catch (Exception e) {}
     }
 
-    private void transaction() throws IOException {
+    private void transaction() throws IOException, InvocationTargetException, NoSuchMethodException, InstantiationException, IllegalAccessException {
         context = new HttpTransactionContext();
         HttpRequest request;
         HttpResponse response;
@@ -68,10 +67,9 @@ class HttpServerThread implements ServerThread, ContextualElement{
         try {
             try {
                 is = new BoundedInputStream(new BufferedInputStream(sock.getInputStream()), Config.INSTANCE.getMaxRequestSize());
-
-                request = new HttpRequest(is); //TODO update to non deprecated method
+                request = HttpRequest.parse(is, Config.INSTANCE.getMaxRequestSize());
                 context.setRequest(request);
-            } catch (URISyntaxException e) {
+            } catch (URISyntaxException | HttpParsingException e) {
                 printException(e);
                 context.setResponse(StandardResponses.BAD_REQUEST.getResponse());
                 sendResponse();
@@ -81,6 +79,7 @@ class HttpServerThread implements ServerThread, ContextualElement{
             printdemoln(request);
 
             route = router.getRoute(request.getUri().getPath());
+
             if (route == null) {
                 context.setResponse(StandardResponses.NOT_FOUND.getResponse());
                 sendResponse();
@@ -90,24 +89,28 @@ class HttpServerThread implements ServerThread, ContextualElement{
             controller = route.getController();
             controller.setContext(context);
 
-	        if(runPreFilters(controller.getClass())){
-		        sendResponse();
-		        return;
-	        }
+            if (runPreFilters(controller.getClass())) {
+                sendResponse();
+                return;
+            }
 
             response = controller.control(route.getPathParams(request.getUri().getPath()));
             context.setResponse(response);
 
-			runPostFilters(controller.getClass());
+            runPostFilters(controller.getClass());
 
             sendResponse();
-        } catch (SocketTimeoutException to) {
+
+        }catch (EOFException e){
+            throw e;
+        } catch (IOException to) {
+            printException(to);
             throw to;
         } catch (Exception e) {
             printException(e);
             context.setResponse(StandardResponses.SERVER_ERROR.getResponse());
             sendResponse();
-            return;
+            throw e;
         }
     }
 
@@ -184,7 +187,7 @@ class HttpServerThread implements ServerThread, ContextualElement{
 	 * @return the zero parameter constructor for c (or null if something weird happens)
 	 * @throws SecurityException if the zero param constructor could not be made accessible
 	 */
-	private Constructor getZeroParamConstructor(Class c) throws SecurityException, NoSuchMethodException {
+	protected static Constructor getZeroParamConstructor(Class c) throws SecurityException, NoSuchMethodException {
 		Constructor[] constructors = c.getConstructors();
 
 		for(Constructor con :constructors){

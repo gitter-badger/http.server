@@ -12,6 +12,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 
+import static black.door.util.DBP.printdebugln;
+
 /**
  * This abomination created by nfischer on 7/7/2015.
  */
@@ -29,15 +31,16 @@ public class FileController extends Controller {
 
 		if(requestedFile.toFile().isDirectory()){
 			HttpResponse response = StandardResponses.OK.getResponse();
+			String path = getRequest().getUri().getPath();
 			String host = getRequest().getHeaders().get("Host");
+			String webpath = (host == null ? "" : host) + path + (path.endsWith("/") ? "" : '/');
+			printdebugln(webpath);
 			StringBuilder bod = new StringBuilder();
 			for(File file : requestedFile.toFile().listFiles()){
-				if(host != null)
-					bod.append(host + '/');
-				bod.append(params[0]);
-				if(!params[0].isEmpty())
-					bod.append('/');
+				bod.append(webpath);
 				bod.append(file.getName());
+				if(file.isDirectory())
+					bod.append('/');
 				bod.append('\n');
 			}
 			response.setBody(bod.toString().getBytes());
@@ -64,7 +67,7 @@ public class FileController extends Controller {
 		try {
 			Files.write(requestedFile, getRequest().getBody(), StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING);
 		} catch (IOException e) {
-			DBP.printdebugln(e);
+			printdebugln(e);
 			return StandardResponses.SERVER_ERROR.getResponse();
 		}
 		return StandardResponses.OK.getResponse();

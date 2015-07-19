@@ -1,14 +1,21 @@
 package black.door.net.http.server;
 
+import black.door.net.http.server.annotations.*;
+import black.door.net.http.server.annotations.Controller;
 import black.door.net.http.server.controllers.FunctionalController;
 import black.door.net.http.server.controllers.HttpFunction;
+import black.door.net.http.tools.HttpResponse;
 import black.door.net.http.tools.HttpVerb;
 import black.door.net.server.Server;
+import org.reflections.Reflections;
+import org.reflections.scanners.MethodAnnotationsScanner;
+import org.reflections.util.ClasspathHelper;
+import org.reflections.util.ConfigurationBuilder;
 
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.util.*;
 import java.util.regex.Pattern;
 
 
@@ -30,15 +37,17 @@ public class HttpServer implements Runnable {
 	public HttpServer(int port){
 		this.port = port;
 		router = new Router();
-		functionalRoutes = new HashMap<>();
+		functionalRoutes = new LinkedHashMap<>();
 	}
 
 	public Router getRouter(){
 		Router router = new Router();
 
-		composeFunctionalRoutes().forEach(e -> router.addRoute(e));
-
 		router.getRoutes().addAll(this.router.getRoutes());
+
+		findAnnotatedRoutes();
+
+		composeFunctionalRoutes().forEach(e -> router.addRoute(e));
 
 		return router;
 	}
@@ -49,7 +58,7 @@ public class HttpServer implements Runnable {
 	}
 
 	/**
-	 * Operations added through this method take precedence over ones added using addRoute(Route).
+	 * Operations added through this method take precedence after ones added using addRoute(Route).
 	 * @param method
 	 * @param path
 	 * @param behavior
@@ -67,6 +76,47 @@ public class HttpServer implements Runnable {
 		functionalRoutes.put(pattern, endpoint);
 
 		return this;
+	}
+
+	private void findAnnotatedRoutes(){
+		Reflections reflections = new Reflections();
+		Set<Class<?>> annotatedClasses = reflections.getTypesAnnotatedWith(Controller.class);
+
+		annotatedClasses.forEach(e -> {
+			String path = e.getAnnotation(Controller.class).value();
+			Reflections r = new Reflections(new ConfigurationBuilder().addScanners(new MethodAnnotationsScanner()).setUrls(Arrays.asList(ClasspathHelper.forClass(e))));//(e);
+
+			Set<Method> methods = r.getMethodsAnnotatedWith(HttpMethod.class);
+
+			Constructor c = null;
+			try {
+				c = HttpServerThread.getZeroParamConstructor(e);
+			} catch (NoSuchMethodException e1) {
+				e1.printStackTrace();
+				throw new RuntimeException("Could not get 0 param constructor of " + e.getCanonicalName());
+			}
+			Object thingy = null;
+			try {
+				thingy = c.newInstance();
+			} catch (InstantiationException | IllegalAccessException | InvocationTargetException e1) {
+				e1.printStackTrace();
+				throw new RuntimeException("Could not invoke 0 param constructor of " + e.getCanonicalName());
+			}
+			final Object finalThingy = thingy;
+			methods.forEach(m -> {
+				HttpVerb verb = m.getAnnotation(HttpMethod.class).value();
+
+				addBehavior(verb, path, (request, params) -> {
+					try {
+						return (HttpResponse) (m.invoke(finalThingy, request, params));
+					} catch (IllegalAccessException | InvocationTargetException e1) {
+						e1.printStackTrace();
+						throw new RuntimeException("Parameters of " + e.getCanonicalName() + '.' + m.getName() +" do not match (HttpRequest, String...)");
+					}
+				});
+			});
+		});
+
 	}
 
 	private List<Route> composeFunctionalRoutes(){
