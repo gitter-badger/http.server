@@ -12,13 +12,19 @@
         <dependency>
             <groupId>black.door</groupId>
             <artifactId>blackdoor-lib</artifactId>
-            <version>v4r2t4</version>
+            <version>v4r2t6</version>
         </dependency>
 
         <dependency>
             <groupId>commons-io</groupId>
             <artifactId>commons-io</artifactId>
             <version>2.4</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.reflections</groupId>
+            <artifactId>reflections</artifactId>
+            <version>0.9.10</version>
         </dependency>
 
         <dependency>
